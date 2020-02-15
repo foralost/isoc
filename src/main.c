@@ -3,22 +3,25 @@
 #include <assert.h>
 #include "include/iso_func.h"
 
-int main(int argc, char** argv)
-{
-	struct ISOFile *file = iso_open("/home/foralost/code/ccpp/iso/src/test.iso");
-	if(!file){
-		iso_print_error("openISO");
-		return -1;
-	}
+int main(int argc, char **argv) {
 
-	struct entryPathTableNode* desc;
-	if ( iso_read_path_table(file, &desc) == -1 )
-		iso_print_error("iso_read_path_table");
+	struct ISOFile *test = iso_open(
+			"/home/foralost/code/ccpp/isoc/src/iso_folder/output.iso");
 
-	struct directoryDescriptorNode* desc_two;
-	if ( iso_read_directories_pt(file->fHandler, &desc->data, &desc_two ) )
-		iso_print_error("iso_read_dir");
-	fflush(stdout);
+	struct ISOEntryFile testfile;
+	struct entryPathTableNode* start;
 
+	if(__iso_read_path_table(test, &start) < 0)
+		iso_print_error("");
+
+	while(start->next)
+		start = start->next;
+
+	iso_print_info_pt(&start->data);
+	struct directoryDescriptorNode *dirs;
+
+	__iso_read_directory_pt(test->fHandler, &start->data, &dirs);
+
+	iso_print_directory_tree(dirs);
 	return 0;
 }

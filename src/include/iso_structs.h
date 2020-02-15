@@ -1,3 +1,6 @@
+#ifndef SRC_ISO_STRUCT_H
+#define SRC_ISO_STRUCT_H 
+
 #include <stdint.h>
 
 enum VDESCR_TYPECODES{
@@ -5,6 +8,10 @@ enum VDESCR_TYPECODES{
 	PARTITION, VDESCR_TERM = 255
 };
 
+struct ISOEntryFile {
+	char* bData;
+	uint32_t iLength;
+};
 
 
 struct entryPathTable{
@@ -15,14 +22,16 @@ struct entryPathTable{
 	char* szDirIdentifier;
 };
 
+
 struct entryPathTableNode{
+	struct entryPathTableNode* prev;
 	struct entryPathTable data;
 	struct entryPathTableNode* next;
 };
 
 
 struct directoryDescriptor{
-	char bLength;
+	char bLengthDescriptor;
 	char bEXTRecordLength;
 	int32_t iLocLSBEXT;
 	int32_t iLocMSBEXT;
@@ -36,7 +45,6 @@ struct directoryDescriptor{
 	int16_t sVolSeqMSB;
 	char bLengthID;
 	char* szDirIdentifier;
-	uint64_t lPos;
 };
 
 struct directoryDescriptorNode {
@@ -100,4 +108,4 @@ struct ISOFile {
 	struct primaryDescriptor strPVD;
 };
 
-
+#endif 
