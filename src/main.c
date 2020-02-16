@@ -11,17 +11,17 @@ int main(int argc, char **argv) {
 	struct ISOEntryFile testfile;
 	struct entryPathTableNode* start;
 
-	if(__iso_read_path_table(test, &start) < 0)
-		iso_print_error("");
+	struct ISOEntryFile *file;
 
-	while(start->next)
-		start = start->next;
 
-	iso_print_info_pt(&start->data);
-	struct directoryDescriptorNode *dirs;
+	if ( __iso_read_directory_rd(test, &file, argv[1]) < 0)
+	{
+		iso_print_error("reading file");
+		return -1;
+	}
 
-	__iso_read_directory_pt(test->fHandler, &start->data, &dirs);
 
-	iso_print_directory_tree(dirs);
+
+	printf("%s", file->bData);
 	return 0;
 }

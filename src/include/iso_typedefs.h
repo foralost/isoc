@@ -39,12 +39,15 @@ enum ISO_ERROR{
 	ISO_PATH_TABLE_READ_ENTRY_FAILED,
 	ISO_DIRECTORY_ENTRY_SEEK_FAILED,
 	ISO_DIRECTORY_ENTRY_READ_FAILED,
-	ISO_DIRECTORY_NOT_FILE
+	ISO_DIRECTORY_NOT_FILE,
+	ISO_FILE_ENTRY_READ_FAILED,
+	ISO_FILE_ENTRY_SEEK_FAILED,
+	ISO_FILE_NOT_FOUND
 };
 
 uint8_t isoError = ISO_NO_ERROR;
 
-const char*  szISOErrors[ISO_ERROR_COUNT][128] =
+const char szISOErrors[ISO_ERROR_COUNT][128] =
 {
 		{"No error reported so far."},
 		{"Loaded .iso file does not have a valid ID for Primary Volume Descriptor."},
@@ -55,7 +58,10 @@ const char*  szISOErrors[ISO_ERROR_COUNT][128] =
 		{"The Path Table in given ISO file seems to be corrupted!"},
 		{"Failed to seek directory entry in .ISO file."},
 		{"Failed to read directory entry in .iSO file."},
-		{"Given directory is not a file."}
+		{"Given directory is not a file."},
+		{"Found file to be searched, but it could not be read."},
+		{"Found file to be searched, but it could not be seeked."},
+		{"Given file could not be found in given .iso file."}
 };
 
 const char* szCDID = "CD001";

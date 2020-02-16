@@ -44,7 +44,7 @@ int iso_close(struct ISOFile* obj)
 
 void iso_print_error(char* szIssue)
 {
-	printf("%.64s: ISO Error: %.128s\n", szIssue, szISOErrors[isoError] );
+	printf("%.64s: ISO Error: %s\n", szIssue, szISOErrors[isoError]);
 }
 
 struct ISOFile* iso_open(char* szPath)
