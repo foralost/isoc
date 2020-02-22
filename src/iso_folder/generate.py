@@ -41,4 +41,4 @@ os.system("rm output.iso")
 os.mkdir("isodir")
 gen_dirs("isodir/", 0)
 
-os.system("mkisofs -iso-level 1 -o output.iso isodir/") 
+os.system("mkisofs -R -iso-level 1 -o output.iso isodir/") 
