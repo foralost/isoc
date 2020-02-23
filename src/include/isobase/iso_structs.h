@@ -45,6 +45,9 @@ struct directoryDescriptor{
 	int16_t sVolSeqMSB;
 	char bLengthID;
 	char* szDirIdentifier;
+	char* szDirExtData;
+	uint8_t iDirExtDataLength;
+
 };
 
 struct directoryDescriptorNode {
