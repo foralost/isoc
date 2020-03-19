@@ -3,30 +3,143 @@
 #ifndef SRC_ISO_READ_C_
 #define SRC_ISO_READ_C_
 
-int iso_print_directory_tree(const struct directoryDescriptorNode *start) {
-
-	while (start) {
-		if ((start->data.bFlags & ISO_FILE_FLAG_SUBDIR)) {
-			printf("Folder: ");
-		} else {
-			printf("Plik: ");
-		}
-
-		if (!start->data.szDirIdentifier[0])
-			printf(". %i\n", start->data.iLocLSBEXT);
-		else if (start->data.szDirIdentifier[0] == 1) {
-			printf(".. %i\n", start->data.iLocLSBEXT);
-		} else {
-			printf("Nazwa: %.25s %i \n", start->data.szDirIdentifier,
-					start->data.iLocLSBEXT);
-		}
-
-		if (!start->data.iLocLSBEXT) {
-			printf("CORRUPTED");
-		}
-		start = start->next;
+int __iso_malloc_root_dir(char **bDest, FILE *f,
+		const struct directoryDescriptor *src) {
+	if (fseek(f, ISO_BLOCK_SIZE * src->iLocLSBEXT, SEEK_SET)) {
+		perror("fseek");
+		isoError = ISO_DIRECTORY_ENTRY_SEEK_FAILED;
+		return -1;
 	}
+	char *bData = malloc(src->iDataLengthLSB);
+
+	if (fread(bData, 1, src->iDataLengthLSB, f)
+			!= (size_t) src->iDataLengthLSB) {
+		isoError = ISO_DIRECTORY_ENTRY_READ_FAILED;
+		free(bData);
+		return -1;
+	}
+
+	*bDest = bData;
+	return 0;
 }
+
+int __iso_cmp_dir_id(const struct directoryDescriptor *strDir,
+		const char *szStr) {
+	int toRet = -1;
+	size_t startPos = 0;
+	if (isoUseRR) {
+		struct rrPosixAlterName *temp;
+		if (__iso_rr_find_altname(strDir, &temp, &startPos) < 0) {
+
+			if (isoVerbose)
+				iso_rr_print_error("find_altername");
+
+			toRet = strncmp(strDir->szDirIdentifier, szStr, strDir->bLengthID);
+		} else {
+			toRet = strncmp(temp->szNameContent, szStr,
+					temp->strBaseData.bLength - 5);
+			free(temp->szNameContent);
+			free(temp);
+		}
+	} else {
+		toRet = strncmp(strDir->szDirIdentifier, szStr, strDir->bLengthID);
+	}
+	return toRet;
+
+}
+int __iso_print_dir_tree(FILE *f, const struct directoryDescriptor *src) {
+	char *bDirData;
+	if (__iso_malloc_root_dir(&bDirData, f, src))
+		return -1;
+	struct directoryDescriptorNode *start;
+
+	if (__iso_read_directories_root(bDirData, src->iDataLengthLSB, &start)
+			< 0) {
+		free(bDirData);
+		isoError = ISO_DIRECTORY_ENTRY_READ_FAILED;
+		return -1;
+	}
+
+	struct directoryDescriptorNode *current = start;
+	char *szDirId = NULL, bFound;
+	while (current) {
+		if (isoUseRR) {
+			size_t startPos = 0;
+			if (__iso_rr_get_dir_id(&szDirId, current->data, &startPos) < 0) {
+				szDirId = current->data->szDirIdentifier;
+				bFound = 0;
+			} else {
+				bFound = 1;
+			}
+		} else {
+			szDirId = current->data->szDirIdentifier;
+		}
+		if (current->data->bFlags & ISO_FILE_FLAG_SUBDIR) {
+			switch (szDirId[0]) {
+			case 1:
+				printf("..\n");
+				break;
+			case 0:
+				printf(".\n");
+				break;
+			default:
+				printf("Folder: %.128s \n", szDirId);
+			}
+
+		} else {
+			printf("File: %.128s \n", szDirId);
+		}
+
+		if (bFound){
+			free(szDirId);
+		}
+		szDirId = NULL;
+		current = current->next;
+	}
+
+	__iso_free_directories(start);
+	free(bDirData);
+	return 0;
+}
+
+int __iso_read_directory_pt(FILE *f, const struct entryPathTable *entry,
+		struct directoryDescriptorNode **dest) {
+
+	if (fseek(f, ISO_BLOCK_SIZE * entry->iExtentLBA, SEEK_SET)) {
+		perror("fseek");
+		isoError = ISO_DIRECTORY_ENTRY_SEEK_FAILED;
+		return -1;
+	}
+	/* Read root directory with whole directory info */
+	char *bDirNoID = malloc(ISO_DIR_ENTRY_NOID_SIZE);
+
+	if (fread(bDirNoID, 1, ISO_DIR_ENTRY_NOID_SIZE,
+			f) != ISO_DIR_ENTRY_NOID_SIZE) {
+		isoError = ISO_DIRECTORY_ENTRY_READ_FAILED;
+		free(bDirNoID);
+		return -1;
+	}
+
+	size_t whole_dir = *((uint32_t*) (bDirNoID + 10));
+	free(bDirNoID);
+
+	char *bData = malloc(whole_dir);
+	if (fseek(f, ISO_BLOCK_SIZE * entry->iExtentLBA, SEEK_SET)) {
+		perror("fseek");
+		free(bData);
+		isoError = ISO_DIRECTORY_ENTRY_SEEK_FAILED;
+		return -1;
+	}
+
+	if (fread(bData, 1, whole_dir, f) != whole_dir) {
+		isoError = ISO_DIRECTORY_ENTRY_READ_FAILED;
+		free(bData);
+		return -1;
+	}
+
+	return __iso_read_directories_root(bData, whole_dir, dest);
+}
+
 int __iso_read_path_table(const struct ISOFile *f,
 		struct entryPathTableNode **dest) {
 	if (fseek(f->fHandler, ISO_BLOCK_SIZE * f->strPVD.iLocTypeLPath,
@@ -51,37 +164,45 @@ int __iso_read_path_table(const struct ISOFile *f,
 
 	struct entryPathTableNode *first, *node = NULL, *prev = NULL;
 	node = __iso_calloc(sizeof(struct entryPathTableNode));
+
 	first = node;
 	first->prev = NULL;
 
 	while (stCounter != (size_t) f->strPVD.iPathTableSizeLSB) {
 
 		if (stCounter > (size_t) f->strPVD.iPathTableSizeLSB) {
-			__iso_free_pathtable(&first);
+			__iso_free_pathtable(first);
+			free(bPathTable);
 			isoError = ISO_PATH_TABLE_READ_ENTRY_FAILED;
 			return -1;
 		}
 
-		node->data.bLengthDIRID = bPathTable[stCounter];
-		node->data.bExtAttrRecLength = bPathTable[stCounter + 1];
-		node->data.iExtentLBA = *((int32_t*) (bPathTable + 2 + stCounter));
-		node->data.sDirNumber = *((int16_t*) (bPathTable + 6 + stCounter));
-		node->data.szDirIdentifier = __iso_calloc(node->data.bLengthDIRID);
-		memcpy(node->data.szDirIdentifier, bPathTable + 8 + stCounter,
-				node->data.bLengthDIRID);
-		stCounter += 8 + node->data.bLengthDIRID;
+		node->data = __iso_calloc(sizeof(*node->data));
+		node->data->bLengthDIRID = bPathTable[stCounter];
+		node->data->bExtAttrRecLength = bPathTable[stCounter + 1];
+		node->data->iExtentLBA = *((int32_t*) (bPathTable + 2 + stCounter));
+		node->data->sDirNumber = *((int16_t*) (bPathTable + 6 + stCounter));
+		node->data->szDirIdentifier = __iso_calloc(node->data->bLengthDIRID);
+		memcpy(node->data->szDirIdentifier, bPathTable + 8 + stCounter,
+				node->data->bLengthDIRID);
+
+		stCounter += 8 + node->data->bLengthDIRID;
 		if (stCounter % 2)
 			stCounter++;
 
-		prev = node;
-		node = __iso_calloc(sizeof(struct entryPathTableNode));
 		items++;
-		prev->next = node;
+		prev = node;
+		node = __iso_calloc(sizeof(*node));
+		node->data = __iso_calloc(sizeof(*node->data));
 		node->prev = prev;
+		prev->next = node;
 	}
 
 	prev->next = NULL;
 	free(node);
+	free(node->data);
+	items--;
+
 	free(bPathTable);
 	*dest = first;
 	return items - 1;
@@ -95,31 +216,17 @@ int __iso_read_file(FILE *f, const struct directoryDescriptor *startDir,
 		return -1;
 	}
 
-	if (fseek(f, ISO_BLOCK_SIZE * startDir->iLocLSBEXT, SEEK_SET)) {
-		isoError = ISO_FILE_ENTRY_SEEK_FAILED;
-		perror("fseek");
+	if (__iso_malloc_root_dir(&szDest->bData, f, startDir))
 		return -1;
-	}
-	char *bData = malloc(startDir->iDataLengthLSB);
 
-	if (fread(bData, 1, startDir->iDataLengthLSB, f)
-			!= startDir->iDataLengthLSB) {
-		isoError = ISO_FILE_ENTRY_READ_FAILED;
-		perror("fread");
-		free(bData);
-		return -1;
-	}
-
-	szDest->bData = bData;
 	szDest->iLength = startDir->iDataLengthLSB;
-
 	return startDir->iDataLengthLSB;
 }
 
 int iso_read_all_directories(FILE *f, const struct entryPathTableNode *start,
 		struct directoryDescriptorNode **desc) {
 
-	struct entryPathTableNode *node = start;
+	const struct entryPathTableNode *node = start;
 
 	int items = 0;
 	while (node) {
@@ -128,192 +235,6 @@ int iso_read_all_directories(FILE *f, const struct entryPathTableNode *start,
 	}
 
 	return items;
-}
-int __iso_read_directories_root(char *bRootData, size_t stRootSize,
-		struct directoryDescriptorNode **dest) {
-	struct directoryDescriptorNode *first, *toRet = malloc(sizeof(*toRet)),
-			*prev, *next;
-	first = toRet;
-
-	size_t counter = 0;
-	int items = 0;
-
-	while (counter != stRootSize) {
-		if (counter > stRootSize) {
-			isoError = ISO_READ_SIZE_MISMATCH;
-			__iso_free_directores(&first);
-			return -1;
-		}
-		if (!bRootData[counter]) {
-			counter++;
-			continue;
-		}
-		__iso_convert_byte_direntry(bRootData, &toRet->data, counter);
-
-		counter += toRet->data.bLengthDescriptor;
-		if (counter % 2)
-			counter++;
-
-		items++;
-		prev = toRet;
-		next = __iso_calloc(sizeof(*toRet));
-		toRet->next = next;
-		toRet = next;
-	}
-
-	if (!toRet->data.bLengthDescriptor) {
-		free(toRet);
-		prev->next = NULL;
-		toRet = prev;
-	}
-
-	*dest = first;
-	return items;
-}
-
-int __iso_ret_path_depth(const char *szPath) {
-	int count = 0;
-	int i = 0;
-	while (szPath[i]) {
-		if (szPath[i] == '/')
-			count++;
-		i++;
-	}
-
-	return count;
-}
-int __iso_read_directory_rd(const struct ISOFile *f, struct ISOEntryFile **dest,
-		const char *szPath) {
-
-	char *szCopyDir = strndup(szPath, 64);
-
-	struct directoryDescriptor rootDir;
-	struct directoryDescriptorNode *currDirs;
-
-	char *szToken = strtok(szCopyDir, "/");
-	int iDepth = __iso_ret_path_depth(szPath);
-	int iCurrDepth = 0;
-	struct directoryDescriptor foundDir;
-	foundDir.iDataLengthLSB = *((uint32_t*) (f->strPVD.szDirEntryRoot + 10));
-	foundDir.iLocLSBEXT = *((uint32_t*) (f->strPVD.szDirEntryRoot + 2));
-
-	char *bRootData;
-	char booleanFound = 0, nowFile = 0;
-	if (iCurrDepth == iDepth - 1) {
-		szToken = strcat(szToken, ";1");
-	}
-
-	while (szToken) {
-		if (fseek(f->fHandler, ISO_BLOCK_SIZE * foundDir.iLocLSBEXT,
-				SEEK_SET)) {
-			perror("fseek");
-			isoError = ISO_DIRECTORY_ENTRY_SEEK_FAILED;
-			free(szCopyDir);
-
-			return -1;
-		}
-		bRootData = malloc(foundDir.iDataLengthLSB);
-
-		if (fread(bRootData, 1, foundDir.iDataLengthLSB, f->fHandler)
-				!= foundDir.iDataLengthLSB) {
-			isoError = ISO_DIRECTORY_ENTRY_READ_FAILED;
-			free(bRootData);
-			free(szCopyDir);
-			return -1;
-		}
-
-		if (__iso_read_directories_root(bRootData, foundDir.iDataLengthLSB, &currDirs) < 0) {
-			return -1;
-		}
-
-		booleanFound = 0;
-		while (!booleanFound && currDirs) {
-
-			if (!strcmp(currDirs->data.szDirIdentifier, szToken)) {
-
-				if (iCurrDepth != (iDepth - 1)
-						&& (currDirs->data.bFlags & ISO_FILE_FLAG_SUBDIR)) {
-
-					booleanFound = 1;
-
-				} else if (iCurrDepth == (iDepth - 1)
-						&& !(currDirs->data.bFlags & ISO_FILE_FLAG_SUBDIR)) {
-
-					booleanFound = 1;
-				}
-
-				if (booleanFound == 1) {
-					free(bRootData);
-					foundDir = currDirs->data;
-					break;
-				}
-
-			}
-
-			currDirs = currDirs->next;
-		}
-
-		if (booleanFound) {
-			szToken = strtok(NULL, "/");
-			iCurrDepth++;
-			if (iCurrDepth == iDepth - 1) {
-				szToken = strcat(szToken, ";1");
-			} else if (iCurrDepth == iDepth) {
-				szToken = strtok(NULL, "/");
-			}
-		} else {
-			break;
-		}
-	}
-
-	if (booleanFound) {
-
-		struct ISOEntryFile *found = __iso_calloc(sizeof(*found));
-		if ( __iso_read_file(f->fHandler, &foundDir, *dest) < 0)
-			return -1;
-		else
-			return (*dest)->iLength;
-	}
-
-	isoError = ISO_FILE_NOT_FOUND;
-	return -1;
-}
-/* dd */
-int __iso_read_directory_pt(FILE *f, const struct entryPathTable *entry,
-		struct directoryDescriptorNode **dest) {
-
-	if (fseek(f, ISO_BLOCK_SIZE * entry->iExtentLBA, SEEK_SET)) {
-		perror("fseek");
-		isoError = ISO_DIRECTORY_ENTRY_SEEK_FAILED;
-		return -1;
-	}
-	/* Read root directory with whole directory info */
-	char *temp = malloc(ISO_DIR_ENTRY_NOID_SIZE);
-
-	if (fread(temp, 1, ISO_DIR_ENTRY_NOID_SIZE, f) != ISO_DIR_ENTRY_NOID_SIZE) {
-		isoError = ISO_DIRECTORY_ENTRY_READ_FAILED;
-		free(temp);
-		return -1;
-	}
-
-	size_t whole_dir = *((uint32_t*) (temp + 10));
-	free(temp);
-
-	char *bData = malloc(whole_dir);
-	if (fseek(f, ISO_BLOCK_SIZE * entry->iExtentLBA, SEEK_SET)) {
-		perror("fseek");
-		free(bData);
-		isoError = ISO_DIRECTORY_ENTRY_SEEK_FAILED;
-		return -1;
-	}
-
-	if (fread(bData, 1, whole_dir, f) != whole_dir) {
-		isoError = ISO_DIRECTORY_ENTRY_READ_FAILED;
-		free(bData);
-		return -1;
-	}
-
-	return __iso_read_directories_root(bData, whole_dir, dest);
 }
 
 void __iso_convert_byte_direntry(char *bData, struct directoryDescriptor *dest,
@@ -331,29 +252,172 @@ void __iso_convert_byte_direntry(char *bData, struct directoryDescriptor *dest,
 	dest->sVolSeqLSB = *((uint16_t*) (bData + 28 + offset));
 	dest->sVolSeqMSB = *((uint16_t*) (bData + 30 + offset));
 	dest->bLengthID = bData[32 + offset];
-	dest->szDirIdentifier = __iso_calloc(dest->bLengthID);
+	dest->szDirIdentifier = __iso_calloc(dest->bLengthID + 1);
 	memcpy(dest->szDirIdentifier, bData + 33 + offset, dest->bLengthID);
+	uint32_t iExtraSize = dest->bLengthDescriptor - 33 - dest->bLengthID;
+	if (iExtraSize > 0) {
+		dest->iDirExtDataLength = iExtraSize;
+		dest->szDirExtData = __iso_calloc(iExtraSize);
+		memcpy(dest->szDirExtData, bData + offset + dest->bLengthID + 33,
+				iExtraSize);
+	}
 }
 
-int iso_find_file_pt(struct ISOFile *f, char *szFileName,
-		struct ISOEntryFile *dest) {
-	char *szDirCopy = strndup(szFileName, 128);
+int __iso_read_directories_root(char *bRootData, size_t stRootSize,
+		struct directoryDescriptorNode **dest) {
+	struct directoryDescriptorNode *first = NULL, *current = NULL, *prev = NULL;
 
-	struct entryPathTableNode *node;
-	__iso_read_path_table(f, &node);
-	while (node->next) {
-		node = node->next;
+	size_t counter = 0;
+	int items = 0;
+	current = __iso_calloc(sizeof(*current));
+	current->data = __iso_calloc(sizeof(*current->data));
+	first = current;
+	while (counter != stRootSize) {
+
+		if (counter > stRootSize) {
+			isoError = ISO_READ_SIZE_MISMATCH;
+			__iso_free_directories(first);
+			return -1;
+		}
+		if (!bRootData[counter]) {
+			counter++;
+			continue;
+		}
+
+		__iso_convert_byte_direntry(bRootData, current->data, counter);
+
+		counter += current->data->bLengthDescriptor;
+		if (counter % 2)
+			counter++;
+
+		prev = current;
+		current = __iso_calloc(sizeof(*current));
+		current->data = __iso_calloc(sizeof(*current->data));
+		prev->next = current;
+		items++;
 	}
 
-	struct directoryDescriptorNode *temp;
-	char *szDirs = strtok(szDirCopy, "/");
-
-	while (szDirs) {
-
-		szDirs = strtok(szDirCopy, "/");
-	}
-
-	return 9;
+	prev->next = NULL;
+	__iso_free_directories(current);
+	items--;
+	*dest = first;
+	return items;
 }
+
+int __iso_ret_path_depth(const char *szPath) {
+	int count = 0;
+	int i = 0;
+	while (szPath[i]) {
+		if (szPath[i] == '/')
+			count++;
+		i++;
+	}
+
+	return count;
+}
+int __iso_read_directory_rd(const struct ISOFile *f,
+		struct directoryDescriptor **dest, const char *szPath) {
+
+	char *szCopyDir = strndup(szPath, 128);
+	struct directoryDescriptorNode *currDirs = NULL, *start = NULL;
+	char bNull = 0;
+	char *szToken = strtok(szCopyDir, "/");
+
+	if (!szToken)
+		szToken = &bNull;
+
+	struct directoryDescriptor *foundDir = __iso_calloc(sizeof(*foundDir));
+
+	foundDir->iDataLengthLSB = *((uint32_t*) (f->strPVD.szDirEntryRoot + 10));
+	foundDir->iLocLSBEXT = *((uint32_t*) (f->strPVD.szDirEntryRoot + 2));
+
+	char *bRootData;
+
+	do {
+		if (__iso_malloc_root_dir(&bRootData, f->fHandler, foundDir)) {
+			__iso_free_directory(foundDir);
+			break;
+		}
+
+		if (__iso_read_directories_root(bRootData, foundDir->iDataLengthLSB,
+				&currDirs) < 0) {
+			isoError = ISO_DIRECTORY_ENTRY_READ_FAILED;
+			free(bRootData);
+			__iso_free_directory(foundDir);
+			free(szCopyDir);
+			return -1;
+		}
+
+		free(bRootData);
+		start = currDirs;
+		while (!foundDir->szDirIdentifier && currDirs) {
+
+			if (!__iso_cmp_dir_id(currDirs->data, szToken)
+					&& (currDirs->data->bFlags & ISO_FILE_FLAG_SUBDIR)) {
+
+				__iso_free_directory(foundDir);
+				foundDir = currDirs->data;
+				currDirs->data = NULL;
+				szToken = NULL;
+			}
+
+			currDirs = currDirs->next;
+		}
+		__iso_free_directories(start);
+		if (!foundDir->szDirIdentifier) {
+			szToken = strtok(NULL, "/");
+		}
+
+	} while (!foundDir->szDirIdentifier && szToken);
+
+	if (foundDir && foundDir->szDirIdentifier) {
+		free(szCopyDir);
+		*dest = foundDir;
+		return 0;
+	}
+	__iso_free_directory(foundDir);
+	free(szCopyDir);
+	isoError = ISO_FILE_NOT_FOUND;
+	return -1;
+}
+
+int __iso_read_dir_for_dirfile(const char *szFileName, FILE *f,
+		const struct directoryDescriptor *src,
+		struct directoryDescriptor **dirfile) {
+	size_t stLength = strnlen(szFileName, 64);
+	char *szDuplicate = __iso_calloc(stLength + 3);
+	memcpy(szDuplicate, szFileName, stLength);
+	szDuplicate[stLength] = ';';
+	szDuplicate[stLength + 1] = '1';
+	char *bRootData;
+
+	if (__iso_malloc_root_dir(&bRootData, f, src)) {
+		free(szDuplicate);
+		return 01;
+	}
+
+	struct directoryDescriptorNode *currDirs, *start;
+	__iso_read_directories_root(bRootData, src->iDataLengthLSB, &currDirs);
+	start = currDirs;
+	struct directoryDescriptor *foundDir = NULL;
+
+	while (currDirs) {
+
+		if (!__iso_cmp_dir_id(currDirs->data, szFileName)
+				&& !(currDirs->data->bFlags & ISO_FILE_FLAG_SUBDIR)) {
+			foundDir = currDirs->data;
+			currDirs->data = NULL;
+			break;
+		}
+		currDirs = currDirs->next;
+	}
+	__iso_free_directories(start);
+	if (!foundDir) {
+		return -1;
+	}
+	*dirfile = foundDir;
+	return 0;
+}
+/* dd */
 
 #endif /* SRC_ISO_READ_C_ */

@@ -1,0 +1,27 @@
+test.o(1): Error! E1061: Expecting data or function declaration, but found ' '
+test.o(1): Error! E1026: Invalid declarator
+test.o(1): Error! E1009: Expecting ';' but found '='
+test.o(1): Error! E1061: Expecting data or function declaration, but found '='
+test.o(1): Error! E1026: Invalid declarator
+test.o(1): Error! E1009: Expecting ';' but found ''
+test.o(1): Error! E1061: Expecting data or function declaration, but found ' '
+test.o(1): Error! E1026: Invalid declarator
+test.o(1): Error! E1061: Expecting data or function declaration, but found '/'
+test.o(1): Warning! W132: No storage class or type specified
+test.o(1): Error! E1009: Expecting ';' but found '/'
+test.o(1): Error! E1061: Expecting data or function declaration, but found '/'
+test.o(1): Warning! W132: No storage class or type specified
+test.o(1): Error! E1009: Expecting ';' but found '/'
+test.o(1): Error! E1061: Expecting data or function declaration, but found '/'
+test.o(1): Warning! W132: No storage class or type specified
+test.o(1): Error! E1009: Expecting ';' but found '/'
+test.o(1): Error! E1061: Expecting data or function declaration, but found '/'
+test.o(1): Warning! W132: No storage class or type specified
+test.o(1): Error! E1009: Expecting ';' but found '/'
+test.o(1): Error! E1061: Expecting data or function declaration, but found '/'
+test.o(1): Warning! W132: No storage class or type specified
+test.o(1): Error! E1009: Expecting ';' but found '/'
+test.o(1): Error! E1061: Expecting data or function declaration, but found '/'
+test.o(1): Warning! W132: No storage class or type specified
+test.o(1): Error! E1009: Expecting ';' but found '/'
+test.o(1): Error! E1147: Too many errors: compilation aborted

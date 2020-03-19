@@ -17,6 +17,8 @@
 
 #define ISO_DIR_ENTRY_NOID_SIZE 33
 
+#define ISO_TRUE	1
+#define ISO_FALSE	0
 
 #define ISO_BLOCK_SIZE 2048
 #define ISO_PRIMARY_DESCRIPTOR_ID 0x01
@@ -46,7 +48,8 @@ enum ISO_ERROR{
 };
 
 uint8_t isoError = ISO_NO_ERROR;
-uint8_t isoVerbose = 0;
+uint8_t isoVerbose = ISO_TRUE;
+uint8_t isoUseRR = ISO_TRUE;
 
 const char szISOErrors[ISO_ERROR_COUNT][128] =
 {

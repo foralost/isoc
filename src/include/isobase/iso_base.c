@@ -50,25 +50,24 @@ void iso_print_error(char* szIssue)
 	printf("%.64s: ISO Error: %s\n", szIssue, szISOErrors[isoError]);
 }
 
-struct ISOFile* iso_open(char* szPath)
+int iso_open(char* szPath, struct ISOFile** dest)
 {
 	FILE* handler = fopen(szPath, "rb");
 
 	if(!handler)
 	{
 		perror("fopen: ");
-		return NULL;
+		return -1;
 	}
 
-	struct ISOFile* toRet = malloc(sizeof (struct ISOFile) );
-	memset(toRet, 0, sizeof(*toRet));
+	struct ISOFile* toRet = __iso_calloc(sizeof (struct ISOFile) );
 	toRet->fHandler = handler;
 	int iRes = fseek(handler, 0x10*ISO_BLOCK_SIZE, SEEK_SET);
 	if(iRes != 0)
 	{
 		perror("fseek: ");
 		iso_close(toRet);
-		return NULL;
+		return -1;
 	}
 
 	int bRead = fread(&toRet->strPVD, 1, sizeof(toRet->strPVD), handler);
@@ -80,7 +79,7 @@ struct ISOFile* iso_open(char* szPath)
 	} else if (bRead != ISO_BLOCK_SIZE) {
 		isoError = ISO_READ_SIZE_MISMATCH;
 		iso_close(toRet);
-		return NULL;
+		return -1;
 	}
 
 	const struct primaryDescriptor* PVD = &toRet->strPVD;
@@ -89,7 +88,7 @@ struct ISOFile* iso_open(char* szPath)
 	{
 		isoError = ISO_NOT_A_PRIMARY_DESCR;
 		iso_close(toRet);
-		return NULL;
+		return -1;
 	}
 
 	for(int i = 0 ; i < 5; i++)
@@ -98,11 +97,12 @@ struct ISOFile* iso_open(char* szPath)
 		{
 			isoError = ISO_FAILED_CD_STRING;
 			iso_close(toRet);
-			return NULL;
+			return -1;
 		}
 	}
 
 	toRet->fHandler = handler;
-	return toRet;
+	*dest = toRet;
+	return 0;
 }
 #endif /* SRC_ISO_BASE_C_ */

@@ -1,6 +1,3 @@
-# ISO File Reader (maybe writer)
+# ISO FS to FAT32 MBR converter with your own bootloader
 
-My attempt to create a program which will allow to read an .ISO file, with option to do some file-based options, like extracting, modifying, replacing etc.
-
-Just compile it with:
-`gcc -Wall -Wextra -Wpedantic main.c`
+My attempt to create a program which will allow to read an .ISO file, and create an MBR partition table with 1 FAT32 partition containing whole device. Also, there will be a support of loading your own bootloader onto the MBR partition table, and given partition.

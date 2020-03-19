@@ -25,14 +25,14 @@ struct entryPathTable{
 
 struct entryPathTableNode{
 	struct entryPathTableNode* prev;
-	struct entryPathTable data;
+	struct entryPathTable* data;
 	struct entryPathTableNode* next;
 };
 
 
 struct directoryDescriptor{
-	char bLengthDescriptor;
-	char bEXTRecordLength;
+	uint8_t bLengthDescriptor;
+	uint8_t bEXTRecordLength;
 	int32_t iLocLSBEXT;
 	int32_t iLocMSBEXT;
 	int32_t iDataLengthLSB;
@@ -43,7 +43,7 @@ struct directoryDescriptor{
 	char bGapSize;
 	int16_t sVolSeqLSB;
 	int16_t sVolSeqMSB;
-	char bLengthID;
+	uint8_t bLengthID;
 	char* szDirIdentifier;
 	char* szDirExtData;
 	uint8_t iDirExtDataLength;
@@ -51,7 +51,7 @@ struct directoryDescriptor{
 };
 
 struct directoryDescriptorNode {
-	struct directoryDescriptor data;
+	struct directoryDescriptor* data;
 	struct directoryDescriptorNode* next;
 };
 struct volumeDescriptor{

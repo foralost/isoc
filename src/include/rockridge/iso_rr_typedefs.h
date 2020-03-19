@@ -13,6 +13,11 @@
 
 #include "iso_rr_structs.h"
 
+#define ISO_RR_NM_CONTINUE_FLAG (1 << 0)
+#define ISO_RR_NM_CURRENT_FLAG (1 << 0)
+#define ISO_RR_NM_PARENT_FLAG (1 << 0)
+
+
 #define ISO_RR_ERRORS_COUNT 128
 
 enum ISO_RR_ERRORS {
@@ -30,7 +35,7 @@ const char szISORRErrors[ISO_RR_ERRORS_COUNT][128] = {
 };
 
 
-char isoRRError = ISO_RR_SUCCESS;
+uint8_t isoRRError = ISO_RR_SUCCESS;
 
 #endif /* SRC_ISO_RR_TYPEDEFS_H_ */
 

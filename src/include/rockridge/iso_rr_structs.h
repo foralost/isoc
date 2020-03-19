@@ -1,5 +1,6 @@
+#ifndef  SRC_ISO_RR_STRUCTS_H_
+#define  SRC_ISO_RR_STRUCTS_H_
 #include <stdint.h>
-
 struct rrBase {
 	char szSignature[3];
 	uint8_t bLength;
@@ -32,7 +33,10 @@ struct _rrSLComponent {
 	uint8_t bLength;
 	char *bContent;
 };
-
+struct _rrEntries {
+	void* data;
+	void* next;
+};
 struct rrSymbolicLink {
 	struct rrBase strBaseData;
 	char bFlags;
@@ -40,7 +44,7 @@ struct rrSymbolicLink {
 };
 
 struct rrPosixAlterName {
-	char szSignature[2];
+	struct rrBase strBaseData;
 	char bFlags;
 	char *szNameContent;
 };
@@ -64,7 +68,10 @@ struct rrRelocatedDir {
 struct rrTimeStamp {
 	struct rrBase strBaseData;
 	char bFlags;
-	char *bTimeStampData;
+	char szCreation[17];
+	char szModifDate[17];
+	char szExpirateDate[17];
+	char szEffectiveDate[17];
 };
 
 struct rrFileDataSparse {
@@ -75,3 +82,4 @@ struct rrFileDataSparse {
 	uint32_t iVTSizeLowMSB;
 	char bTableDepth;
 };
+#endif
