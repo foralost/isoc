@@ -48,8 +48,8 @@ int __mbr_init_from_dev(int fd, struct MBR* data)
 void __mbr_init(struct MBR* data)
 {
 	memset(data, 0, sizeof(*data));
-	data->bSignature[0] = 0x55;
-	data->bSignature[1] = 0xAA;
+	data->bSignature[0] =	(uint8_t) 	0x55;
+	data->bSignature[1] = 	(uint8_t) 	0xAA;
 }
 
 void __mbr_act_toggle_part(struct partitionEntry* entry)

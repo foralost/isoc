@@ -1,0 +1,40 @@
+.name
+RRIP
+.fullname
+Rock Ridge Interchange Protocol
+.aminet-dir
+docs/misc
+.type
+Documentation
+.short
+Rock Ridge / System Use Sharing Protocol
+.description
+The anxiously awaited new, 1.12 versions of the System Use Sharing Protocol
+and the Rock Ridge Interchange Protocol are now available for review and
+comment.  The documents are available through anonymous ftp at ftp.ossi.com
+in /pub.
+
+The documents are available in both MS Word 6 format (*.doc) and Postscript
+format (*.ps).  Otherwise, the file names should be self-explanatory.  The
+files are called: rrip112.doc, rrip112.ps, susp112.doc, and susp112.ps.
+
+If you have comments or constructive criticism of these new versions of the
+specifications, please feel free to respond to cdfdf@ymi.com.  We are trying
+to get these documents to ballot as an IEEE standard soon, so we would
+appreciate prompt response.  We hope to review all the responses at the next
+working group meeting on August 26, 1994, so any responses we gather by end
+of business of August 24 will be considered at that meeting.
+.version
+?.?
+.author
+Andrew Young
+CDFSF WG Chair
+President, Young Minds, Inc.
+.distribution
+Copyrighted but Freely Redistributable
+.email
+cdfdf@ymi.com
+.described-by
+Fred Fish (fnf@amigalib.com)
+.submittal
+Posted to usenet group comp.publish.cdrom.software.
