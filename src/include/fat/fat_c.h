@@ -25,6 +25,7 @@
 enum FAT32_ERRORS {
 	FAT32_SUCCESS,
 	FAT32_ERROR_READING_SECTOR,
+	FAT32_ERROR_WRITING_SECTOR,
 	FAT32_ERROR_SEEKING_SECTOR,
 	FAT32_INVALID_FSINFO_SIG,
 	FAT32_INVALID_BOOT_SIG,
@@ -34,13 +35,18 @@ enum FAT32_ERRORS {
 	FAT32_ERROR_READING_CLUSTER,
 	FAT32_NOT_A_REGULAR_FILE,
 	FAT32_NOT_A_LONG_DIR,
-	FAT32_NOT_ENOUGH_CLUSTERS
+	FAT32_NOT_ENOUGH_CLUSTERS,
+	FAT32_INVALID_SECONDS,
+	FAT32_INVALID_MINUTES,
+	FAT32_INVALID_HOURS,
+	FAT32_INVALID_BPB_SIGNATURE,
 };
 
 uint8_t fatError = FAT32_SUCCESS;
 
 char szFatErrors[32][128] = { "No errors reported so far.",
-		"Error during reading a sector", "Error during seeking a sector.",
+		"Error during reading a sector", "Error during writing a sector.",
+		"Error during seeking a sector.",
 		"There was an invalid signature for filesystem info structure.",
 		"There was an invalid boot signature found.",
 		"Invalid system identifier string found in extended boot record.",
@@ -48,7 +54,11 @@ char szFatErrors[32][128] = { "No errors reported so far.",
 		"The reserved bytes were violated by containing nonzero value.",
 		"Failed to read cluster.", "Given directory is not a long directory.",
 		"Given file is not a regular file.",
-		"There is not enough free clusters." };
+		"There is not enough free clusters.",
+		"Invalid range of seconds was given. Acceptable is 0-59.",
+		"Invalid range of minutes was given. Acceptable is 0-59.",
+		"Invalid range of hours was given. Acceptable is 0-23.",
+		"Invalid Bios Parameter Block Signature." };
 
 #include "fat_c.c"
 

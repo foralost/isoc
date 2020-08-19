@@ -23,13 +23,14 @@
  * 			#	FAT32:
  * 			#		-	GRUNTOWNE PRZEBADANIE WYCIEKÓW PAMIĘCI
 * 			#		-	ERROR-HANDLING
-* 			#		-
+* 			#		-	DOKUNENTACJA
  * 			#
  * 			#
  *
  *
  */
-int main(int argc, char **argv) {
+int main(void)
+{
 
 	int fd;
 	__fat_get_device_open("/dev/loop0", &fd);
@@ -46,8 +47,7 @@ int main(int argc, char **argv) {
 			&databp);
 
 	struct sectorSizeFat32 dest;
-	__fat_read_fsinfo(fd, data.partitions[0].StartLBA + databp.ext.sFSInfo,
-			temp.llBytesPerSect, &dest);
+	__fat_read_fsinfo(fd, data.partitions[0].StartLBA, &databp, &dest);
 
 	struct directoryShortEntryFat32 test;
 	memset(&test, 0, sizeof(test));

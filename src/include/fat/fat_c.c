@@ -121,11 +121,15 @@ struct fileEntryFat32 {
 	unsigned char *bData;
 };
 
+/*
+ * Write a chunk of data bData of given length, to a device fd.
+ */
 ssize_t __fat_write_data(int fd, void *bData, size_t length) {
 	ssize_t iWritten;
 	iWritten = write(fd, bData, length);
 
 	if (iWritten <= 0) {
+		fatError = FAT32_ERROR_WRITING_SECTOR;
 		perror("write ");
 		return -1;
 	}
@@ -136,6 +140,14 @@ ssize_t __fat_write_data(int fd, void *bData, size_t length) {
 	}
 
 	return iWritten;
+}
+
+/*
+ * Self explanatory, prints info about currently set error.
+ */
+void __fat_print_error(const char *szPrefix) {
+	printf("%s:%s", szPrefix, szFatErrors[fatError]);
+	return;
 }
 
 char __fat_is_valid_cluster(const uint32_t sector) {
@@ -149,19 +161,31 @@ char __fat_is_valid_cluster(const uint32_t sector) {
 	}
 }
 
+/*
+ * Tries to find a free cluster in a FAT table.
+ * If given cluster is found, its index is saved in index.
+ *
+ * If there is no free clusters, function returns -1.
+ */
 int __fat_find_free_cluster(const struct biosParameterBlockFat32 *databp,
 		uint32_t *index) {
 	uint32_t fatSize = (databp->ext.iFATSz32 * databp->sBytsPerSec) / 4;
 	for (uint32_t i = 2; i < fatSize; i++) {
 		if (databp->FAT_TABLE[i] == FAT32_CLUSTER_AVAILABLE) {
 			*index = i;
-			break;
+			return 0;
 		}
 	}
-	return 0;
+	return -1;
 }
 
-int __fat_seek_last_cluster(const int fd, const uint32_t cluster,
+/*
+ * Seeks last cluster in a given cluster chain using FAT table.
+ *
+ * Function stores index of FAT table entry which represents the last cluster
+ * in a cluster chain.
+ */
+int __fat_seek_last_cluster(const uint32_t cluster,
 		const struct biosParameterBlockFat32 *databp, uint32_t *dest) {
 	uint32_t currentCluster = cluster, prev;
 
@@ -174,6 +198,10 @@ int __fat_seek_last_cluster(const int fd, const uint32_t cluster,
 	return 0;
 }
 
+/*
+ *	Dumps given cluster to a destination device.
+ *	It uses src->iNumber to determine clusters location on a device.
+ */
 int __fat_write_cluster(const int fd, const struct clusterListFAT32 *src,
 		const struct biosParameterBlockFat32 *databp) {
 	uint32_t pos = (databp->uFirstDataSector
@@ -189,6 +217,11 @@ int __fat_write_cluster(const int fd, const struct clusterListFAT32 *src,
 	return 0;
 }
 
+/*
+ *	Sets state of a cluster (cluster) in FAT table, to a given value.
+ *	If given device contains a two FAT tables, that change is recorded
+ *	on both of them.
+ */
 int __fat_set_cluster(const uint32_t cluster, const uint32_t value,
 		struct biosParameterBlockFat32 *databp) {
 	databp->FAT_TABLE[cluster] = value;
@@ -197,6 +230,16 @@ int __fat_set_cluster(const uint32_t cluster, const uint32_t value,
 	}
 	return 0;
 }
+
+/*
+ * This function finds a free cluster and assigns it as a last element of
+ * given list.
+ *
+ * Additionally, this function marks previously free cluster
+ * as a last in chain in a FAT table, and marks last cluster with an index
+ * of free cluster.
+ *
+ */
 int __fat_allocate_cluster(struct biosParameterBlockFat32 *databp,
 		struct clusterListFAT32 *dest) {
 	struct clusterListFAT32 *currEntry = dest, *newEntry;
@@ -209,11 +252,18 @@ int __fat_allocate_cluster(struct biosParameterBlockFat32 *databp,
 	__fat_find_free_cluster(databp, &freeCluster); //FIXME: Remember error handling!
 	__fat_set_cluster(freeCluster, FAT32_CLUSTER_END_LOW, databp);
 	__fat_set_cluster(currCluster, freeCluster, databp);
-	__fat_read_clusters(freeCluster, databp, &newEntry);
+	__fat_init_freecluster(freeCluster, databp, &newEntry);
 	dest->next = newEntry;
 	return 0;
 
 }
+
+/*
+ * This function updates FAT table stored on the device with FAT table
+ * stored in memory.
+ *
+ * Also, it updates second FAT table, if exists.
+ */
 int __fat_update_fattable(const int fd, const uint32_t LBAStart,
 		const struct biosParameterBlockFat32 *databp) {
 	uint32_t FATStart = (databp->sRsvdSecCnt + LBAStart) * databp->sBytsPerSec;
@@ -233,6 +283,11 @@ int __fat_update_fattable(const int fd, const uint32_t LBAStart,
 	return 0;
 }
 
+/*
+ * This function is used to place/create a normal directory in FAT filesystem.
+ *
+ * It places 3 short entry directories with reserving new clusters.
+ */
 int __fat_insert_normdir(const int fd, struct directoryShortEntryFat32 *src,
 		struct clusterListFAT32 *dest, struct biosParameterBlockFat32 *databp) {
 	/*
@@ -374,15 +429,31 @@ int __fat_get_file(const int fd, const struct directoryShortEntryFat32 *info,
 		return -1;
 	}
 
-	szDest = malloc(info->iFileSize);
+	*szDest = malloc(info->iFileSize);
 	uint32_t iCluster = 0;
+
 	iCluster |= info->sFSTCLUSHI;
 	iCluster <<= 16;
 	iCluster |= info->sFSTCLUSLO;
 
-	struct clusterListFAT32 *list;
+	struct clusterListFAT32 *current = NULL, *list = NULL;
 	__fat_read_clusters(fd, iCluster, databp, &list);
 
+	current = list;
+	uint32_t offset = 0;
+
+	while (current->next) {
+		memcpy(*szDest + offset, current->bData,
+				databp->bSecPerClus * databp->sBytsPerSec);
+		offset += databp->sBytsPerSec;
+		current = current->next;
+	}
+
+	uint32_t delta = info->iFileSize - offset;
+
+	memcpy(*szDest + offset, current->bData, delta);
+	__fat_free_clusters(list);
+	;
 	return 0;
 }
 
@@ -401,11 +472,13 @@ int __fat_read_sector(const int fd, const uint32_t LBAStart,
 	}
 	return 0;
 }
-int __fat_read_fsinfo(const int fd, const uint32_t LBAStart,
-		const uint32_t secSize, struct sectorSizeFat32 *dest) {
-	char temp[secSize];
-	memset(temp, 0, secSize);
-	if (__fat_read_sector(fd, LBAStart, secSize, temp))
+int __fat_read_fsinfo(const int fd, const uint32_t partStart,
+		const struct biosParameterBlockFat32 *databp,
+		struct sectorSizeFat32 *dest) {
+	char temp[databp->sBytsPerSec];
+	memset(temp, 0, databp->sBytsPerSec);
+	if (__fat_read_sector(fd, partStart + databp->ext.sFSInfo,
+			databp->sBytsPerSec, temp))
 		return -1;
 
 	for (int i = 0; i < 480; i++)
@@ -443,22 +516,28 @@ int __fat_read_fsinfo(const int fd, const uint32_t LBAStart,
 	dest->iNxtFree = *((uint32_t*) (temp + 0x1ec));
 	return 0;
 }
+/*
+ *
+ */
 int __fat_read_bpb(const int fd, const uint32_t LBAStart,
 		const uint32_t secSize, struct biosParameterBlockFat32 *data) {
 	if (lseek(fd, LBAStart * secSize, SEEK_SET) < 0) {
 		perror("lseek");
+		fatError = FAT32_ERROR_SEEKING_SECTOR;
 		return -1;
 	}
 
 	char bData[secSize];
 	if (read(fd, bData, secSize) <= 0) {
 		free(bData);
+		fatError = FAT32_ERROR_READING_SECTOR;
 		perror("read");
 		return -1;
 	}
 
 	if (bData[66] != 0x28 && bData[66] != 0x29) {
 		free(bData);
+		fatError = FAT32_INVALID_BPB_SIGNATURE;
 		return -1;
 	}
 
@@ -532,7 +611,12 @@ int __fat_read_bpb(const int fd, const uint32_t LBAStart,
 	}
 	return 0;
 }
-int __fat_get_device_open(char *szDeviceName, int *fd) {
+
+/*
+ *
+ */
+
+int __fat_get_device_open(const char *szDeviceName, int *fd) {
 	int ofd = open(szDeviceName, O_RDWR);
 	if (ofd < 0) {
 		perror("open");
@@ -542,21 +626,24 @@ int __fat_get_device_open(char *szDeviceName, int *fd) {
 	return 0;
 }
 
-int __fat_convertts_to_h(uint16_t src, struct tm *dest) {
-	memset(dest, 0, sizeof(*dest));
-	return 0;
-}
+/*
+ *
+ */
 int __fat_converth_to_timestamp(struct tm *date, uint16_t *dest) {
 	if (date->tm_sec > 59) {
+		fatError = FAT32_INVALID_SECONDS;
 		return -1;
 	}
 	if (date->tm_min > 59) {
+		fatError = FAT32_INVALID_MINUTES;
 		return -1;
 	}
 
 	if (date->tm_hour > 23) {
+		fatError = FAT32_INVALID_HOURS;
 		return -1;
 	}
+
 	int temp = date->tm_sec;
 	temp = temp >> 1;
 	*dest = 0;
@@ -650,6 +737,7 @@ int __fat_get_long_dir(const char *szSrc, struct directoryLongEntryFat32 **dest)
 
 int __fat_get_short_dir(const char *szData, const size_t length,
 		const size_t offset, struct directoryShortEntryFat32 **dest) {
+
 	if (offset + FAT32_DIR_ENTRY_SIZE > length) {
 		return -1;
 	}
@@ -677,7 +765,6 @@ int __fat_check_free_clusters(const struct biosParameterBlockFat32 *databp,
 		return -1;
 	}
 	uint32_t count = 0;
-	uint32_t offset = 0;
 	uint32_t fatSize = databp->ext.iFATSz32 * databp->sBytsPerSec
 			/ sizeof(uint32_t);
 
@@ -691,12 +778,18 @@ int __fat_check_free_clusters(const struct biosParameterBlockFat32 *databp,
 
 	return 0;
 }
-// This function must be hidden. It DOES NOT represent a normal clusterList.
-// ONLY the last cluster is memory allocated to align the cluster size boundary,
-// ONLY if the file size is not a multiplication of cluster size.
-//
-// This way we avoid duplicating huge chunks of memory when a large file is given.
 
+/* This function must be hidden. It DOES NOT represent a normal clusterList.
+ * ONLY the last cluster is memory allocated to align the cluster size boundary,
+ * ONLY if the file size is not a multiplication of cluster size.
+ *
+ * This way we avoid duplicating huge chunks of memory when a large file is given.
+ *
+ * This function converts byte array bData into one-way list, which represents a list of
+ * clusters. Each element of this list represent one cluster, which has an array of byte data
+ * of length 1 cluster represented by databp.
+ *
+ */
 int __fat_byte_to_clusters(unsigned char *bData, const uint32_t size,
 		const struct biosParameterBlockFat32 *databp,
 		struct clusterListFAT32 **dest) {
@@ -734,7 +827,13 @@ int __fat_byte_to_clusters(unsigned char *bData, const uint32_t size,
 	*dest = start;
 	return 0;
 }
-
+/*
+ * This function places a short directory entry in a free entry of cluster,
+ * which is located in the given list of clusters.
+ *
+ * If there is no free entry in the given cluster list, a new cluster
+ * is allocated and assigned to the last element of the list.
+ */
 int __fat_place_shortdir(struct clusterListFAT32 *dest,
 		const struct directoryShortEntryFat32 *src,
 		struct biosParameterBlockFat32 *databp) {
@@ -769,10 +868,12 @@ int __fat_place_shortdir(struct clusterListFAT32 *dest,
 	memcpy(bStart + offset + 24, &src->sWRTDate, 2);
 	memcpy(bStart + offset + 26, &src->sFSTCLUSLO, 2);
 	memcpy(bStart + offset + 28, &src->iFileSize, 4);
-
 	return 0;
 
 }
+/*
+ *
+ */
 int __fat_insert_file(const int fd, uint32_t startCluster,
 		struct biosParameterBlockFat32 *databp, struct fileEntryFat32 *src) {
 
@@ -793,6 +894,7 @@ int __fat_insert_file(const int fd, uint32_t startCluster,
 	src->shortEntry.sFSTCLUSHI = freeCluster >> 8;
 	src->shortEntry.sFSTCLUSLO = freeCluster & 0x000000FF;
 	currCluster->iNumber = freeCluster;
+
 	__fat_write_cluster(fd, currCluster, databp);
 	__fat_set_cluster(freeCluster, FAT32_CLUSTER_END_LOW, databp);
 	currCluster = currCluster->next;
