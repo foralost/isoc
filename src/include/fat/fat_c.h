@@ -40,6 +40,10 @@ enum FAT32_ERRORS {
 	FAT32_INVALID_MINUTES,
 	FAT32_INVALID_HOURS,
 	FAT32_INVALID_BPB_SIGNATURE,
+	FAT32_ERROR_UNEXPECTED_END,
+	FAT32_NO_FREE_CLUSTERS,
+	FAT32_VIOLATION_RDONLY,
+	FAT32_INVALID_START_DIRS
 };
 
 uint8_t fatError = FAT32_SUCCESS;
@@ -58,7 +62,12 @@ char szFatErrors[32][128] = { "No errors reported so far.",
 		"Invalid range of seconds was given. Acceptable is 0-59.",
 		"Invalid range of minutes was given. Acceptable is 0-59.",
 		"Invalid range of hours was given. Acceptable is 0-23.",
-		"Invalid Bios Parameter Block Signature." };
+		"Invalid Bios Parameter Block Signature.",
+		"Unexpected end of cluster.",
+		"There is no free clusters available.",
+		"There was a vialotion of a read only flag.",
+		"The directory named %s points to an invalid directory cluster."
+};
 
 #include "fat_c.c"
 

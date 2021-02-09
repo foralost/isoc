@@ -88,6 +88,6 @@ startlba:	dd 	1
 		dd 	0
 
 TIMES 510 - ($ - $$) db 0	;Fill the rest of sector with 0
-DW 0xAA55			;Add boot signature at the end of bootloader
+DW 0xAA55					;Add boot signature at the end of bootloader
 
 

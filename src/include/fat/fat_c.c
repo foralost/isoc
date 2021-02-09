@@ -166,6 +166,9 @@ char __fat_is_valid_cluster(const uint32_t sector) {
  * If given cluster is found, its index is saved in index.
  *
  * If there is no free clusters, function returns -1.
+ *
+ * TODO: Maybe store currently free index somewhere? Not using FSInfo?
+ *
  */
 int __fat_find_free_cluster(const struct biosParameterBlockFat32 *databp,
 		uint32_t *index) {
@@ -291,15 +294,19 @@ int __fat_update_fattable(const int fd, const uint32_t LBAStart,
 int __fat_insert_normdir(const int fd, struct directoryShortEntryFat32 *src,
 		struct clusterListFAT32 *dest, struct biosParameterBlockFat32 *databp) {
 	/*
-	 * TODO:
-	 * 	Due to specification, using fields from FileSystem Info is not safe.
+	 * TODO: Due to specification, using fields from FileSystem Info is not safe.
 	 * 	Find out if it is true, for now, we will find a free cluster manually.
 	 */
 
+	//FIXME: Error handling
 	struct clusterListFAT32 *currEntry = dest;
 
 	uint32_t freeCluster;
-	__fat_find_free_cluster(databp, &freeCluster); //FIXME: Error handling
+	if (__fat_find_free_cluster(databp, &freeCluster) == -1) {
+		fatError = FAT32_NO_FREE_CLUSTERS;
+		return -1;
+
+	}
 	src->sFSTCLUSLO = freeCluster;
 
 	__fat_place_shortdir(currEntry, src, databp);
@@ -351,7 +358,7 @@ int __fat_merge_clusters(char **szDest,
 }
 
 int __fat_free_clusters(struct clusterListFAT32 *start) {
-	struct clusterListFAT32 *current, *next;
+	struct clusterListFAT32 *current = NULL, *next = NULL;
 	current = start;
 	while (current) {
 		free(current->bData);
@@ -421,7 +428,8 @@ int __fat_read_clusters(const int fd, const uint32_t clusterNumb,
 	return 0;
 }
 
-int __fat_get_file(const int fd, const struct directoryShortEntryFat32 *info,
+int __fat_get_file_content(const int fd,
+		const struct directoryShortEntryFat32 *info,
 		const struct biosParameterBlockFat32 *databp, char **szDest) {
 
 	if (info->bDirAttr & FAT32_DIR_ATTR_DIRECTORY) {
@@ -706,22 +714,38 @@ int __fat_get_device_close(int fd) {
 	return res;
 }
 
-int __fat_get_long_dir(const char *szSrc, struct directoryLongEntryFat32 **dest) {
+/* TODO: Create a function to obtain a struct with info about short and long directory entries
+ * for at given offset.
+ */
+int __fat_get_dir_info(struct dirEntryPairFat32 **dest,
+		const struct clusterListFAT32 *src,
+		const struct biosParameterBlockFat32 *databp) {
+	struct listDirLEFat32 *longEntries;
+	__fat_get_long_dirs(src, databp, &longEntries);
 
-	struct directoryLongEntryFat32 *currLongDir = calloc(1,
-			sizeof(struct directoryLongEntryFat32));
-	size_t offset = 0, count = 0;
+	struct directoryShortEntryFat32 *shortEntry;
+	__fat_get_short_dir(src, databp, 0, &shortEntry);
 
-	if ((uint8_t) szSrc[offset] == FAT32_DIR_FREE
-			|| (uint8_t) szSrc[offset] == FAT32_DIR_FREE_END) {
-		return 0;
-	}
-	count = szSrc[offset] & FAT32_DIR_LONG_ENTRY_MASK;
-	if (count == 0 || (uint8_t) szSrc[offset + 11] != FAT32_DIR_ATTR_LONG_NAME
+	*dest = calloc(sizeof(**dest), 1);
+	(*dest)->listLE = longEntries;
+	(*dest)->shortEntry = shortEntry;
+	return 0;
+}
+
+//TODO: Base on clusters..
+int __fat_get_long_dir(const struct clusterListFAT32 *clusterSrc,
+		const uint32_t offset, struct directoryLongEntryFat32 **dest) {
+
+	const unsigned char *szSrc = clusterSrc->bData;
+
+	if ((uint8_t) szSrc[offset + 11] != FAT32_DIR_ATTR_LONG_NAME
 			|| szSrc[offset + 26] != 0) {
 		fatError = FAT32_NOT_A_LONG_DIR;
 		return -1;
 	}
+
+	struct directoryLongEntryFat32 *currLongDir = calloc(1,
+			sizeof(struct directoryLongEntryFat32));
 
 	currLongDir->bOrder = szSrc[offset];
 	memcpy(currLongDir->szName, szSrc + offset + 1, 10);
@@ -735,13 +759,111 @@ int __fat_get_long_dir(const char *szSrc, struct directoryLongEntryFat32 **dest)
 
 }
 
-int __fat_get_short_dir(const char *szData, const size_t length,
-		const size_t offset, struct directoryShortEntryFat32 **dest) {
+//TODO: Create a function for creating a list of long directory entries
+//TODO: God damn long entries are boring
 
+int __fat_get_long_dirs(const struct clusterListFAT32 *src,
+		const struct biosParameterBlockFat32 *databp, uint32_t *offset,
+		uint32_t *skipped, struct listDirLEFat32 **dest) {
+
+	uint32_t currentOffset = *offset;
+	const unsigned char *bData = src->bData;
+	struct directoryLongEntryFat32 *firstEntry;
+	// ---------------------------------------
+	if (__fat_get_long_dir(src, currentOffset, &firstEntry)) {
+		fatError = FAT32_NOT_A_LONG_DIR;
+		return -1;
+	}
+
+	if (currentOffset >= (databp->bSecPerClus * databp->sBytsPerSec)) {
+		currentOffset = 0;
+		if (!src->next) {
+			fatError = FAT32_ERROR_UNEXPECTED_END;
+			return -1;
+		} else {
+			src = src->next;
+			currentOffset = 0;
+			bData = src->bData;
+			skipped += 1;
+		}
+
+	} else {
+		currentOffset += FAT32_DIR_ENTRY_SIZE;
+	}
+
+	// ---------------------------------------
+	uint8_t count = firstEntry->bOrder & 0x3F;
+	struct listDirLEFat32 *start = NULL, *prev = NULL, *current;
+	current = malloc(sizeof(*current));
+	current->data = firstEntry;
+	prev = current;
+	start = current;
+
+	for (uint8_t i = 1; i < count; i++) {
+		current = malloc(sizeof(*current));
+		current->data = malloc(sizeof(*(current->data)));
+		prev->next = current;
+
+		if (__fat_get_long_dir(src, currentOffset, &current->data)) {
+			free(current);
+			free(current->data);
+			return -1;
+		}
+
+		if (currentOffset >= (databp->bSecPerClus * databp->sBytsPerSec)) {
+			currentOffset = 0;
+			if (!src->next) {
+				fatError = FAT32_ERROR_UNEXPECTED_END;
+				free(current);
+				free(current->data);
+				return -1;
+			} else {
+				src = src->next;
+				currentOffset = 0;
+				bData = src->bData;
+				*skipped += 1;
+			}
+
+		} else {
+			currentOffset += FAT32_DIR_ENTRY_SIZE;
+		}
+		prev = current;
+	}
+	*dest = start;
+	*offset = currentOffset;
+	return 0;
+}
+
+//TODO: Base on clusters...
+
+int __fat_get_first_sdir(const struct clusterListFAT32 *clusterSource,
+		const struct biosParameterBlockFat32 *databp, uint32_t *offset,
+		struct directoryShortEntryFat32 **dest) {
+	unsigned char *currCluster = clusterSource->bData;
+	uint32_t currOffset = 0;
+
+	while (currCluster[currOffset] != FAT32_DIR_FREE
+			&& currCluster[currOffset] != FAT32_DIR_FREE_END
+			&& currCluster[currOffset] != 0) {
+
+		if (currOffset < (databp->bSecPerClus * databp->sBytsPerSec))
+			currOffset += FAT32_DIR_ENTRY_SIZE;
+		else
+			return -1;
+	}
+
+	return __fat_get_short_dir(clusterSource, databp, &currOffset, dest);
+}
+
+int __fat_get_short_dir(const struct clusterListFAT32 *clusterSource,
+		const struct biosParameterBlockFat32 *databp, uint32_t *offset,
+		struct directoryShortEntryFat32 **dest) {
+	uint32_t length = databp->bSecPerClus * databp->sBytsPerSec;
 	if (offset + FAT32_DIR_ENTRY_SIZE > length) {
 		return -1;
 	}
-	// We assume that the offset is already at the right position.
+
+	const unsigned char *szData = clusterSource->bData;
 	struct directoryShortEntryFat32 *temp = calloc(sizeof(**dest), 1);
 	memcpy(temp->szDirName, offset + szData, 11);
 	temp->bDirAttr = szData[offset + 11];
@@ -886,7 +1008,7 @@ int __fat_insert_file(const int fd, uint32_t startCluster,
 		return -1;
 	}
 
-	struct clusterListFAT32 *currCluster;
+	struct clusterListFAT32 *currCluster, *prevCluster;
 	__fat_byte_to_clusters(src->bData, src->shortEntry.iFileSize, databp,
 			&currCluster);
 
@@ -905,10 +1027,17 @@ int __fat_insert_file(const int fd, uint32_t startCluster,
 
 		freeCluster = nextFree;
 		__fat_write_cluster(fd, currCluster, databp);
+		prevCluster = currCluster;
 		currCluster = currCluster->next;
 	}
 
 	__fat_set_cluster(freeCluster, FAT32_CLUSTER_END_LOW, databp);
+
+	if (src->shortEntry.iFileSize
+			% (databp->bSecPerClus * databp->sBytsPerSec)) {
+		free(prevCluster->bData);
+		free(prevCluster);
+	}
 
 	struct clusterListFAT32 *startClusters;
 	__fat_read_clusters(fd, startCluster, databp, &startClusters);
@@ -917,3 +1046,106 @@ int __fat_insert_file(const int fd, uint32_t startCluster,
 	return 0;
 }
 
+int __fat_get_clusterno(const struct directoryShortEntryFat32 *src,
+		uint32_t *dest) {
+
+	uint32_t toRet = src->sFSTCLUSLO;
+	toRet <<= 16;
+	toRet |= toRet | src->sFSTCLUSHI;
+	*dest = toRet;
+
+	return 0;
+}
+
+int __fat_check_valid_dir(struct clusterListFAT32 *src,
+		const struct biosParameterBlockFat32 *databp) {
+	struct directoryShortEntryFat32 *dot, *dotdot;
+
+	if (__fat_get_short_dir(src, databp, 0, &dot)
+			|| __fat_get_short_dir(src, databp, FAT32_DIR_ENTRY_SIZE,
+					&dotdot)) {
+		free(dot);
+		free(dotdot);
+		return -1;
+	}
+
+	char szDot[11];
+	memset(szDot, ' ', 11);
+	szDot[0] = '.';
+
+	char szDots[11];
+	memset(szDots, ' ', 12);
+	szDots[0] = '.';
+	szDots[1] = '.';
+
+	if (memcmp(dot->szDirName, szDot, 11)
+			|| memcmp(dotdot->szDirName, szDots, 11)) {
+		free(dot);
+		free(dotdot);
+		return -1;
+	}
+
+	free(dot);
+	free(dotdot);
+	return 0;
+}
+
+int __fat_mark_cluster_content_invalid(struct clusterListFAT32* src)
+{
+	uint32_t offset = 0;
+	while(src->bData[ offset ] != FAT32_ )
+	return -1;
+}
+
+
+int __fat_remove_directory(const int fd, struct directoryShortEntryFat32 *src, struct biosParameterBlockFat32* databp) {
+	struct clusterListFAT32* dirContent;
+	uint32_t dirContentCluster;
+	__fat_get_clusterno(src, &dirContentCluster);
+
+
+	if ( __fat_read_clusters(fd, dirContentCluster, databp, &dirContent) < 0)
+	{
+		return -1;
+	}
+
+
+	if ( __fat_check_valid_dir(dirContent, databp) < 0 )
+	{
+		return -1;
+	}
+
+
+	return 0;
+}
+int __fat_remove_content_file(struct directoryShortEntryFat32 *src,
+		struct biosParameterBlockFat32 *databp) {
+
+	if (src->bDirAttr & FAT32_DIR_ATTR_READ_ONLY) {
+		fatError = FAT32_VIOLATION_RDONLY;
+		return -1;
+	}
+
+	uint32_t dataCluster = 0;
+	__fat_get_clusterno(src, &dataCluster);
+
+	uint32_t nextCluster = databp->FAT_TABLE[dataCluster];
+
+	__fat_set_cluster(dataCluster, FAT32_CLUSTER_INVALID, databp);
+
+	while (__fat_is_valid_cluster(nextCluster)) {
+		__fat_set_cluster(nextCluster, FAT32_CLUSTER_INVALID, databp);
+		nextCluster = databp->FAT_TABLE[nextCluster];
+	}
+
+	return 0;
+}
+
+/*
+ * Remove a directory using a short name.
+ */
+int __fat_remove_shortdir(const int fd, struct directoryShortEntryFat32 *src,
+		struct clusterListFAT32 *src, struct biosParameterBlockFat32 *databp) {
+
+	return 0;
+}

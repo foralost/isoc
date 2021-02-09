@@ -24,6 +24,7 @@
  * 			#		-	GRUNTOWNE PRZEBADANIE WYCIEKÓW PAMIĘCI
 * 			#		-	ERROR-HANDLING
 * 			#		-	DOKUNENTACJA
+* 			#		- 	DŁUGIE WPISY
  * 			#
  * 			#
  *
@@ -49,25 +50,17 @@ int main(void)
 	struct sectorSizeFat32 dest;
 	__fat_read_fsinfo(fd, data.partitions[0].StartLBA, &databp, &dest);
 
-	struct directoryShortEntryFat32 test;
-	memset(&test, 0, sizeof(test));
-	test.bDirAttr = FAT32_DIR_ATTR_READ_ONLY;
-	memset(&test, ' ', 11);
-	test.szDirName[0] = 'F';
-	test.szDirName[1] = 'I';
-	test.szDirName[2] = 'N';
-	test.szDirName[3] = '3';
+	struct clusterListFAT32* destCluster;
+	__fat_read_clusters(fd, 2, &databp, &destCluster);
 
-	struct fileEntryFat32 testfile;
-	testfile.shortEntry = test;
-	testfile.shortEntry.iFileSize = 8192;
-	testfile.bData = malloc(8192);
-	testfile.bData[0] = 'H';
-	testfile.bData[1] = 'H';
+	struct listDirLEFat32* lDirs;
+	uint32_t offset = 0;
+	uint32_t skipped = 0;
+	__fat_get_long_dirs(destCluster, &databp, &offset, &skipped,&lDirs);
 
-	struct clusterListFAT32* mainDir;
-	__fat_insert_file(fd, 3, &databp, &testfile);
-	__fat_update_fattable(fd, data.partitions[0].StartLBA, &databp);
+	struct directoryShortEntryFat32* shortEntry;
+	__fat_get_short_dir(destCluster, &databp, &offset, &shortEntry);
+
 	fsync(fd);
 	return 0;
 }
